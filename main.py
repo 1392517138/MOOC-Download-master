@@ -2,6 +2,7 @@ import requests
 # from bs4 import BeautifulSoup
 import re
 import os
+import pymysql
 
 HEADER = {'User-Agent': 'Mozilla/5.0'}
 SOURCE_INFO_URL = 'http://www.icourse163.org/dwr/call/plaincall/CourseBean.getMocTermDto.dwr'
@@ -21,21 +22,24 @@ class Course(object):
         self.course = course
 
     def get_course_info(self):
-        '''
-        获取课程基本信息
-        获取课程id用于发送post请求
-        '''
-        course_page_url = self.course_page_url + self.course
-        course_page = requests.get(course_page_url, headers=HEADER)
-        id_pattern_compile = re.compile(r'id:(\d+),')
-        # 获取课程名称
-        basicinfo_pattern_compile = re.compile(
-            r'<meta name="description" .*?content=".*?,(.*?),(.*?),.*?/>')
-        basic_set = re.search(basicinfo_pattern_compile, course_page.text)
-        self.course_title = basic_set.group(1)
-        self.course_collage = basic_set.group(2)
-        self.course_id = re.search(id_pattern_compile,
-                                   course_page.text).group(1)
+        try:
+            '''
+            获取课程基本信息
+            获取课程id用于发送post请求
+            '''
+            course_page_url = self.course_page_url + self.course
+            course_page = requests.get(course_page_url, headers=HEADER)
+            id_pattern_compile = re.compile(r'id:(\d+),')
+            # 获取课程名称
+            basicinfo_pattern_compile = re.compile(
+                r'<meta name="description" .*?content=".*?,(.*?),(.*?),.*?/>')
+            basic_set = re.search(basicinfo_pattern_compile, course_page.text)
+            self.course_title = basic_set.group(1)
+            self.course_collage = basic_set.group(2)
+            self.course_id = re.search(id_pattern_compile,
+                                       course_page.text).group(1)
+        except ArithmeticError:
+            pass
 
 
 def get_course_all_source(course_id):
@@ -47,6 +51,7 @@ def get_course_all_source(course_id):
     # c0-param0：代表课程id
     # batchId：可以为任意时间戳
     # 其他字段为固定不变字段
+    print(video_level + '---video_level')
     post_data = {
         'callCount': '1',
         'scriptSessionId': '${scriptSessionId}190',
@@ -58,6 +63,7 @@ def get_course_all_source(course_id):
         'c0-param2': 'boolean:true',
         'batchId': '1492167717772'
     }
+    print(course_id + '---get_course_all_source')
 
     source_info = requests.post(
         SOURCE_INFO_URL, data=post_data, headers=HEADER)
@@ -103,8 +109,9 @@ def get_course_all_source(course_id):
                     rename = re.sub(name_pattern_compile, '', single_video[3])
                     file.write('　　[视频] %s \n' % (rename))
                     get_content(
+                        course_id,
                         single_video, '%d.%d.%d [视频] %s' %
-                        (index + 1, sub_index + 1, video_index + 1, rename),
+                                      (index + 1, sub_index + 1, video_index + 1, rename),
                         video_level)
                     count_num += 1
                 # 遍历二级目录下pdf集合，写入目录并下载
@@ -112,12 +119,26 @@ def get_course_all_source(course_id):
                     rename = re.sub(name_pattern_compile, '', single_pdf[3])
                     file.write('　　[文档] %s \n' % (rename))
                     get_content(
+                        course_id,
                         single_pdf, '%d.%d.%d [文档] %s' %
-                        (index + 1, sub_index + 1, pdf_index + 1 + count_num,
-                         rename))
+                                    (index + 1, sub_index + 1, pdf_index + 1 + count_num,
+                                     rename))
 
 
-def get_content(single_content, name, *args):
+def get_content(course_id, single_content, name, *args):
+    conn = pymysql.connect(host='127.0.0.1', port=3306, db='graduate',
+                           user='root', password='13452078118')
+    cusor = conn.cursor()
+    course = Course()
+    # 定义插入sql
+    # 插入资源
+    sql1 = "insert into resource (course_id,resource_type,resource_name) value (%s,%s,%s)"
+    # 插入视频
+    sql2 = "insert into pdf (resource_id,pdf_url) value (%s,%s)"
+    # 插入文档
+    sql3 = "insert into mp4 (resource_id,mp4_url) value (%s,%s)"
+    # 定义下载地址
+    url2 = ''
     '''
     如果是文档，则直接下载
     如果是视频，则保存链接供第三方下载
@@ -159,20 +180,33 @@ def get_content(single_content, name, *args):
             video_down_url = re.search(download_pattern_compile,
                                        sources).group(1)
         except AttributeError:
-            print('－－－－－－－－－－－－－－－－－－－－－－－－')
-            print(name + '没有该清晰度格式，降级处理')
-            print('－－－－－－－－－－－－－－－－－－－－－－－－')
-            download_pattern_compile = re.compile(r'mp4SdUrl="(.*?\.mp4).*?"')
-            video_down_url = re.search(download_pattern_compile,
-                                       sources).group(1)
+            # print('－－－－－－－－－－－－－－－－－－－－－－－－')
+            # print(name + '没有该清晰度格式，降级处理')
+            # print('－－－－－－－－－－－－－－－－－－－－－－－－')
+            # download_pattern_compile = re.compile(r'mp4SdUrl="(.*?\.mp4).*?"')
+            # video_down_url = re.search(download_pattern_compile,
+            #                            sources).group(1)
+
+            # 如果发生异常，跳过
+            return
+
         print('正在存储链接：' + name + '.mp4')
         with open('Links.txt', 'a', encoding='utf-8') as file:
             file.write('%s \n' % (video_down_url))
+            url2 = video_down_url
         with open('Rename.bat', 'a', encoding='utf-8') as file:
             video_down_url = re.sub(r'/', '_', video_down_url)
-            file.write('rename "' + re.search(
-                r'http:.*video_(.*.mp4)', video_down_url).group(1) + '" "' +
-                       name + '.mp4"' + '\n')
+
+            # file.write('rename "' + re.search(
+            #     r'http:.*video_(.*.mp4)', video_down_url).group(1) + '" "' +
+            #            name + '.mp4"' + '\n')
+            file.write(name + '\n')
+        # 先插入resource
+        cusor.execute(sql1, (course_id, 'mp4', name))
+        # 获取主键id，再插入mp4
+        cusor.execute(sql3, (conn.insert_id(), url2))
+        conn.commit()
+
     # 如果是文档的话
     else:
         pdf_download_url = re.search(r'textOrigUrl:"(.*?)"', sources).group(1)
@@ -180,60 +214,119 @@ def get_content(single_content, name, *args):
         pdf_file = requests.get(pdf_download_url, headers=HEADER)
         if not os.path.isdir('PDFs'):
             os.mkdir(r'PDFs')
-        with open('PDFs\\' + name + '.pdf', 'wb') as file:
-            file.write(pdf_file.content)
+        with open('PDFLinks.txt', 'a', encoding='utf-8') as file:
+            file.write('%s \n' % (pdf_download_url))
+        with open('PDFName.txt', 'a', encoding='utf-8') as file:
+            file.write('%s \n' % (name))
+            # with open('PDFs\\' + name + '.pdf', 'wb') as file:
+            #     file.write(pdf_file.content)
+            # 插入文档表
+            # 先插入resource
+            cusor.execute(sql1, (course_id, 'pdf', name))
+            # 获取主键id，再插入mp4
+            cusor.execute(sql2, (conn.insert_id(), pdf_download_url))
+            conn.commit()
+
+    cusor.close()
+    conn.close()
 
 
 def select_video_level():
-    '''
-    选择视频质量
-    '''
-    print('\n')
-    print('－－－－－－－－－－－－－－－－－－－－－－－－')
-    print("|　请选择视频质量：　　　　　　　　　　　　　　|")
-    print("|　　　　　　　　　　　　　　　　　　　　　　　|")
-    print("|（ａ）标清　　　（ｂ）高清　　　（ｃ）超清　　|")
-    print("|　　　　　　　　　　　　　　　　　　　　　　　|")
-    print('－－－－－－－－－－－－－－－－－－－－－－－－')
-    video_level = input('请选择（a或b或c）')
-    level = {'a': "标清", 'b': '高清', 'c': "超清"}
-    print('\n')
-    print('－－－－－－－－－－－－－－－－－－－－－－－－')
-    print('视频将下载为【' + level.get(video_level) + '】')
-    print('－－－－－－－－－－－－－－－－－－－－－－－－')
-    print('\n')
-    return (video_level)
+    # '''
+    # 选择视频质量
+    # '''
+    # print('\n')
+    # print('－－－－－－－－－－－－－－－－－－－－－－－－')
+    # print("|　请选择视频质量：　　　　　　　　　　　　　　|")
+    # print("|　　　　　　　　　　　　　　　　　　　　　　　|")
+    # print("|（ａ）标清　　　（ｂ）高清　　　（ｃ）超清　　|")
+    # print("|　　　　　　　　　　　　　　　　　　　　　　　|")
+    # print('－－－－－－－－－－－－－－－－－－－－－－－－')
+    # video_level = input('请选择（a或b或c）')
+    # level = {'a': "标清", 'b': '高清', 'c': "超清"}
+    # print('\n')
+    # print('－－－－－－－－－－－－－－－－－－－－－－－－')
+    # print('视频将下载为【' + level.get(video_level) + '】')
+    # print('－－－－－－－－－－－－－－－－－－－－－－－－')
+    # print('\n')
+    return 'a'
 
 
 def check_select_course(course):
-    '''
-    提供用户监测输入的课程编号是否正确
-    '''
-    print("\n")
-    print('－－－－－－－－－－－－－－－－－－－－－－－－')
-    print('您选择的是：')
-    print(course.course_title + '\n' + course.course_collage)
-    print('－－－－－－－－－－－－－－－－－－－－－－－－')
-    return input('请确认输入（y/n）：')
+    # '''
+    # 提供用户监测输入的课程编号是否正确
+    # '''
+    # print("\n")
+    # print('－－－－－－－－－－－－－－－－－－－－－－－－')
+    # print('您选择的是：')
+    # print(course.course_title + '\n' + course.course_collage)
+    # print('－－－－－－－－－－－－－－－－－－－－－－－－')
+    # return input('请确认输入（y/n）：')
+    return 'y'
 
 
 def main():
+    conn = pymysql.connect(host='127.0.0.1', port=3306, db='graduate',
+                           user='root', password='13452078118')
+    cusor = conn.cursor()
     course = Course()
     # 因为Links文件夹为追加模式打开，所以需要事先删除
     if os.path.exists('Links.txt'):
         os.remove('Links.txt')
+    if os.path.exists('PDFLinks.txt'):
+        os.remove('PDFLinks.txt')
+    if os.path.exists('PDFName.txt'):
+        os.remove('PDFName.txt')
     # 同样是追加模式，首先删除原来的，然后确定新的编码格式
     if os.path.exists("Rename.bat"):
         os.remove("Rename.bat")
         with open('Rename.bat', 'a', encoding='utf-8') as file:
             file.writelines('chcp 65001\n')
-    while True:
-        course.set_course(input("\n请输入课程id（例如SICNU-1002031014）"))
-        course.get_course_info()
-        if check_select_course(course) == 'y':
-            break
-    get_course_all_source(course.course_id)
+    # 查询课程id
+    sql = "select course_id from mooc "
+    cusor.execute(sql)
+    acourseid = cusor.fetchall()
+    bcourseid = []
+    # 将查处的元祖中的元祖列表转为字符串数组
+    for a in acourseid:
+        bcourseid.append(a[0])
+    # print(bcourseid)
+    # for i in courseid:
+    #     print(i)
+    conn.commit()
+
+    # cusor.close()
+    # conn.close()
+
+    # while True:
+    # course.set_course(input("\n请输入课程id（例如SICNU-1002031014）"))
+    # 进行遍历存储
+    sql4 = 'update mooc set course_id=%s where course_id=%s'
+    # for i in bcourseid:
+    #     try:
+    #         course.set_course(i)
+    #         course.get_course_info()
+    #         # if check_select_course(course) == 'y':
+    #         #     break
+    #         #更改mooc course_id名
+    #         print(i)
+    #         print(course.course_id)
+    #         cusor.execute(sql4,[course.course_id,i])
+    #         conn.commit()
+    #         #获取资源
+    #         # get_course_all_source(course.course_id)
+    #     except BaseException:
+    #         continue
+    course_id = 'SWJTU - 1001911007'
+    course.set_course(course_id)
+    course.get_course_info()
+    cusor.execute(sql4, [course.course_id, course_id])
+    conn.commit()
 
 
+# print(bcourseid[0])
+# get_course_all_source(bcourseid[0])
+    cusor.close()
+    conn.close()
 if __name__ == '__main__':
     main()
